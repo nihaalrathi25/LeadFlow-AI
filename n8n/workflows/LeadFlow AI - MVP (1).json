@@ -1,0 +1,1283 @@
+{
+  "name": "LeadFlow AI - MVP",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1c0d95f6-2b4d-417d-a46f-063d37ff7b03",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/sample_leads.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        0
+      ],
+      "id": "43b806f9-4e26-4e0b-b878-0827276e2ac5",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "8fe69a17-3e2e-4a3c-8716-9536b0497874",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const validLeads = [];\nconst invalidLeads = [];\n\nfor (const item of $input.all()) {\n  const lead = item.json;\n\n  const errors = [];\n\n  // Required fields\n  if (!lead.name?.trim()) {\n    errors.push(\"Missing name\");\n  }\n\n  if (!lead.email?.trim()) {\n    errors.push(\"Missing email\");\n  }\n\n  if (!lead.company?.trim()) {\n    errors.push(\"Missing company\");\n  }\n\n  // Basic email validation\n  if (\n    lead.email &&\n    !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(lead.email)\n  ) {\n    errors.push(\"Invalid email\");\n  }\n\n  // Basic website validation\n  if (\n    lead.website &&\n    !/^https?:\\/\\/.+/.test(lead.website)\n  ) {\n    errors.push(\"Invalid website\");\n  }\n\n  // Employee count validation\n  if (\n    lead.employees !== undefined &&\n    lead.employees !== \"\" &&\n    isNaN(Number(lead.employees))\n  ) {\n    errors.push(\"Invalid employee count\");\n  }\n\n  if (errors.length === 0) {\n    validLeads.push({\n      json: {\n        ...lead,\n        validation_status: \"valid\",\n        validation_errors: []\n      }\n    });\n  } else {\n    invalidLeads.push({\n      json: {\n        ...lead,\n        validation_status: \"invalid\",\n        validation_errors: errors\n      }\n    });\n  }\n}\n\nreturn validLeads;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "65fabe7d-c4d2-4010-9cea-9fa0993f1429",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const seen = new Set();\nconst uniqueLeads = [];\n\nfor (const item of $input.all()) {\n  const lead = item.json;\n\n  const key = (\n    lead.email ||\n    `${lead.company}-${lead.name}`\n  ).toLowerCase().trim();\n\n  if (!seen.has(key)) {\n    seen.add(key);\n\n    uniqueLeads.push({\n      json: {\n        ...lead,\n        duplicate_status: \"unique\"\n      }\n    });\n  }\n}\n\nreturn uniqueLeads;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "49fa8e0f-8ffe-4ca1-85fb-0bd92625b9a7",
+      "name": "Deduplication"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "0d134e60-c536-4519-b634-aa221253e512",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        240
+      ],
+      "id": "6f69ec7e-d94e-40c2-ad65-084e361231bb",
+      "name": "Wait",
+      "webhookId": "19c7ccf7-d3d5-453a-8135-4fb6226b50ac"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"stream\": false,\n  \"format\": \"json\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a strict B2B lead qualification analyst for an AI automation freelancer. Your job is to determine whether a company is a genuinely promising prospect for AI and workflow automation services. IMPORTANT SCORING RULES: Use ONLY facts explicitly provided in the lead data. Never invent pain points, business processes, buying signals, or company information. Do not assume that a company needs automation simply because it is large or belongs to a technology-related industry. Lack of evidence must reduce the score. Be conservative. A normal company with no explicit automation need should NOT receive 80+. HIGH should be difficult to achieve. Score these five factors: industry_fit 0-20, company_fit 0-15, automation_potential 0-25, pain_point_strength 0-20, buying_intent 0-20. For industry_fit, strong relevance to AI or workflow automation means a higher score, while weak or unrelated relevance means a lower score. For company_fit, consider company size and available company information, but do not assume large companies automatically need automation. For automation_potential, give a high score ONLY when the provided information indicates processes that could realistically benefit from automation. If no automation-related evidence is provided, keep this score low. For pain_point_strength, give a high score ONLY when explicit pain points are provided. If no pain points are provided, score this low. Do NOT invent pain points. For buying_intent, give a high score ONLY when explicit buying intent, a request for help, or a clear purchase signal is provided. If there is no buying signal, score this low. The total score MUST equal industry_fit + company_fit + automation_potential + pain_point_strength + buying_intent. Classification: 80-100 = HIGH, 60-79 = MEDIUM, 0-59 = LOW. For pain_points, include ONLY pain points explicitly supported by the input. If none are provided, return an empty array []. Return ONLY valid JSON. Do NOT use markdown. Do NOT include explanations outside the JSON. Do NOT include text before or after the JSON. Return exactly these fields: score, tier, industry_fit, company_fit, automation_potential, pain_point_strength, buying_intent, pain_points, recommended_service, outreach_angle, reason.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze this lead:\\\\nName: {{$json.name}}\\\\nEmail: {{$json.email}}\\\\nCompany: {{$json.company}}\\\\nWebsite: {{$json.website}}\\\\nIndustry: {{$json.industry}}\\\\nCountry: {{$json.country}}\\\\nEmployees: {{$json.employees}}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1248,
+        16
+      ],
+      "id": "aa573247-32a6-4bfd-83b1-1d9f6833dd2e",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  const content = item.json.message.content;\n\n  const parsed = JSON.parse(content);\n\n  results.push({\n    json: {\n      ...item.json,\n      ...parsed\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -64
+      ],
+      "id": "b9fe41bc-2dfa-4d54-a12f-2ffd12d00d2f",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const lead = $('Deduplication').item.json;\n\n  return {\n    json: {\n      name: lead.name,\n      email: lead.email,\n      company: lead.company,\n      website: lead.website,\n      industry: lead.industry,\n      country: lead.country,\n      employees: Number(lead.employees),\n\n      score: item.json.score,\n      tier: item.json.tier,\n      industry_fit: item.json.industry_fit,\n      company_fit: item.json.company_fit,\n      automation_potential: item.json.automation_potential,\n      pain_point_strength: item.json.pain_point_strength,\n      buying_intent: item.json.buying_intent,\n      pain_points: item.json.pain_points,\n      recommended_service: item.json.recommended_service,\n      outreach_angle: item.json.outreach_angle,\n      reason: item.json.reason\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -64
+      ],
+      "id": "36c6f2b4-29fb-481b-9a99-bda77c036e2c",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a1a65682-90eb-40cc-9922-0c7c6cf7d5fd",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1824,
+        -64
+      ],
+      "id": "ca17be6f-1f71-4b0b-a72f-3acd6f1d8cf5",
+      "name": ">=80"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5126952f-030a-4521-8dbc-02ddbf959957",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2032,
+        32
+      ],
+      "id": "70119c2f-3ed7-4d5a-ad53-9190d6c18ad2",
+      "name": ">=60"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fb672d09-8800-4cca-b4d5-54d0c4f566e5",
+              "name": "lead_status",
+              "value": "HIGH_PRIORITY",
+              "type": "string"
+            },
+            {
+              "id": "6e956221-00f4-49f7-9520-70d41354e968",
+              "name": "processed_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2112,
+        -256
+      ],
+      "id": "41d42847-7851-48e6-b45d-f02e947f9ef0",
+      "name": "HIGH Priority Lead"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e78a3b08-06a8-40d4-8934-f66254753da7",
+              "name": "lead_status",
+              "value": "MEDIUM_QUALIFIED",
+              "type": "string"
+            },
+            {
+              "id": "09f81cf1-a429-4601-b73e-0e6fd6c28913",
+              "name": "processed_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2240,
+        16
+      ],
+      "id": "277d68cd-a733-4bfe-aec9-29b7c672a1e6",
+      "name": "mid priority leads"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "LeadFlow AI - Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1494624355,
+          "mode": "list",
+          "cachedResultName": "Sheet2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=1494624355"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('>=80').item.json.name }}",
+            "email": "={{ $('>=80').item.json.email }}",
+            "company": "={{ $('>=80').item.json.company }}",
+            "website": "={{ $('>=80').item.json.website }}",
+            "industry": "={{ $('>=80').item.json.industry }}",
+            "country": "={{ $('>=80').item.json.country }}",
+            "employees": "={{ $('>=80').item.json.employees }}",
+            "score": "={{ $('>=80').item.json.score }}",
+            "tier": "={{ $('>=80').item.json.tier }}",
+            "industry_fit": "={{ $('>=80').item.json.industry_fit }}",
+            "company_fit": "={{ $('>=80').item.json.company_fit }}",
+            "automation_potential": "={{ $('>=80').item.json.automation_potential }}",
+            "pain_point_strength": "={{ $('>=80').item.json.pain_point_strength }}",
+            "buying_intent": "={{ $('>=80').item.json.buying_intent }}",
+            "pain_points": "={{ $('>=80').item.json.pain_points }}",
+            "recommended_service": "={{ $('>=80').item.json.recommended_service }}",
+            "outreach_angle": "={{ $('>=80').item.json.outreach_angle }}",
+            "reason": "={{ $('>=80').item.json.reason }}",
+            "lead_status": "={{ $json.lead_status }}",
+            "processed_at": "={{ $json.processed_at }}"
+          },
+          "matchingColumns": [
+            "name"
+          ],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "employees",
+              "displayName": "employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "tier",
+              "displayName": "tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "industry_fit",
+              "displayName": "industry_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company_fit",
+              "displayName": "company_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "automation_potential",
+              "displayName": "automation_potential",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pain_point_strength",
+              "displayName": "pain_point_strength",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "buying_intent",
+              "displayName": "buying_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pain_points",
+              "displayName": "pain_points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "recommended_service",
+              "displayName": "recommended_service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "outreach_angle",
+              "displayName": "outreach_angle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2320,
+        -256
+      ],
+      "id": "794584e2-8f59-4265-9f8c-b2f0eceb32c2",
+      "name": "Append row in sheet"
+      
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "LeadFlow AI - Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('>=60').item.json.name }}",
+            "email": "={{ $('>=60').item.json.email }}",
+            "company": "={{ $('>=60').item.json.company }}",
+            "website": "={{ $('>=60').item.json.website }}",
+            "industry": "={{ $('>=60').item.json.industry }}",
+            "country": "={{ $('>=60').item.json.country }}",
+            "employees": "={{ $('>=60').item.json.employees }}",
+            "score": "={{ $('>=60').item.json.score }}",
+            "tier": "={{ $('>=60').item.json.tier }}",
+            "industry_fit": "={{ $('>=60').item.json.industry_fit }}",
+            "company_fit": "={{ $('>=60').item.json.company_fit }}",
+            "automation_potential": "={{ $('>=60').item.json.automation_potential }}",
+            "pain_point_strength": "={{ $('>=60').item.json.pain_point_strength }}",
+            "buying_intent": "={{ $('>=60').item.json.buying_intent }}",
+            "pain_points": "={{ $('>=60').item.json.pain_points }}",
+            "recommended_service": "={{ $('>=60').item.json.recommended_service }}",
+            "outreach_angle": "={{ $('>=60').item.json.outreach_angle }}",
+            "reason": "={{ $('>=60').item.json.reason }}",
+            "lead_status": "={{ $json.lead_status }}",
+            "processed_at": "={{ $json.processed_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "employees",
+              "displayName": "employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "tier",
+              "displayName": "tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "industry_fit",
+              "displayName": "industry_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company_fit",
+              "displayName": "company_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "automation_potential",
+              "displayName": "automation_potential",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pain_point_strength",
+              "displayName": "pain_point_strength",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "buying_intent",
+              "displayName": "buying_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pain_points",
+              "displayName": "pain_points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "recommended_service",
+              "displayName": "recommended_service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "outreach_angle",
+              "displayName": "outreach_angle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2448,
+        0
+      ],
+      "id": "a7e4c8cb-7310-4301-81f5-2c9c8bd0a1e1",
+      "name": "Append row in sheet1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e337fc4-a278-485b-baea-b281e226fe63",
+              "name": "lead_statu",
+              "value": "LOW_QUALIFIED",
+              "type": "string"
+            },
+            {
+              "id": "bbce9e12-eefc-4295-ab5e-ffa1bf17810a",
+              "name": "processed_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2224,
+        224
+      ],
+      "id": "c894b199-a315-412a-91f9-0025bc955558",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "LeadFlow AI - Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 184075861,
+          "mode": "list",
+          "cachedResultName": "Sheet3",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=184075861"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "employees",
+              "displayName": "employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tier",
+              "displayName": "tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "industry_fit",
+              "displayName": "industry_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_fit",
+              "displayName": "company_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "automation_potential",
+              "displayName": "automation_potential",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pain_point_strength",
+              "displayName": "pain_point_strength",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "buying_intent",
+              "displayName": "buying_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pain_points",
+              "displayName": "pain_points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recommended_service",
+              "displayName": "recommended_service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "outreach_angle",
+              "displayName": "outreach_angle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2432,
+        224
+      ],
+      "id": "adf7ecc4-5cc9-4a1a-830e-e02e9cf819ff",
+      "name": "Append row in sheet2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2:3b\",\n  \"stream\": false,\n  \"format\": \"json\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Write only a short generic B2B outreach message about AI workflow automation. Do not mention any names, companies, industries, employee counts, pain points, buying signals, or facts. Do not use placeholders. Return JSON with exactly one field: outreach_body.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a natural 40-60 word outreach body for an AI automation freelancer. Keep it general and professional. Do not include a greeting or signature.\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2336,
+        -448
+      ],
+      "id": "6c269722-baee-4c42-89e0-75a6912451ae",
+      "name": "Generate Outreach"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  const lead = $('Code in JavaScript2').item.json;\n\n  const content = item.json.message.content;\n  const parsed = JSON.parse(content);\n\n  const outreachBody = parsed.outreach_body;\n\n  results.push({\n    json: {\n      ...lead,\n      outreach_message: `Hi ${lead.name},\n\nI came across ${lead.company} and noticed you're in the ${lead.industry} space.\n\n${outreachBody}\n\nBest regards,\nNihaal`\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2544,
+        -448
+      ],
+      "id": "3590fefa-9fec-4eb4-8188-6290c9b39c6f",
+      "name": "Build Outreach Message"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Deduplication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplication": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": ">=80",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    ">=80": {
+      "main": [
+        [
+          {
+            "node": "HIGH Priority Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": ">=60",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    ">=60": {
+      "main": [
+        [
+          {
+            "node": "mid priority leads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mid priority leads": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HIGH Priority Lead": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Outreach": {
+      "main": [
+        [
+          {
+            "node": "Build Outreach Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Outreach Message": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d2a95e0b-5304-4099-9a63-ae4d70f24df8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4e458e2e807c59e5187dca37df3c437b42574f905024f549601bc2b5b79858e0"
+  },
+  "nodeGroups": [],
+  "id": "clBbBml4Kmv54wif",
+  "tags": []
+}

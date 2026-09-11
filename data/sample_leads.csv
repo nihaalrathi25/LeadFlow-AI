@@ -1,0 +1,6 @@
+name,email,company,website,industry,country,employees
+Rahul Sharma,rahul@acme.example,Acme Technologies,https://acme.example,SaaS,India,120
+Priya Mehta,priya@techcorp.example,TechCorp,https://techcorp.example,FinTech,India,45
+Amit Patel,amit@cloudworks.example,CloudWorks,https://cloudworks.example,Cloud Computing,India,210
+Sneha Rao,sneha@smallshop.example,SmallShop,https://smallshop.example,Retail,India,8
+Arjun Shah,arjun@dataflow.example,DataFlow,https://dataflow.example,Data Analytics,India,85
